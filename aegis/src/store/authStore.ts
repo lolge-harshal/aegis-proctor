@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
+import { signInWithEmail, signOut } from '@/services/supabase'
 
 export type UserRole = 'admin' | 'proctor' | 'candidate'
 
@@ -12,50 +12,58 @@ export interface User {
 }
 
 interface AuthState {
+    // ── State ──────────────────────────────────────────────────────────────
     user: User | null
-    token: string | null
     isAuthenticated: boolean
     isLoading: boolean
+    /** Holds the last auth error message, cleared on next login attempt. */
+    error: string | null
+
+    // ── Actions ────────────────────────────────────────────────────────────
     login: (email: string, password: string) => Promise<void>
-    logout: () => void
+    logout: () => Promise<void>
+    /** Called by useAuthInit to sync Supabase session → store. */
+    setUserFromSession: (user: User | null) => void
     setLoading: (loading: boolean) => void
+    clearError: () => void
 }
 
-export const useAuthStore = create<AuthState>()(
-    persist(
-        (set) => ({
-            user: null,
-            token: null,
-            isAuthenticated: false,
-            isLoading: false,
+export const useAuthStore = create<AuthState>()((set) => ({
+    user: null,
+    isAuthenticated: false,
+    isLoading: true, // true on mount — resolved by useAuthInit
+    error: null,
 
-            login: async (email: string, _password: string) => {
-                set({ isLoading: true })
-                // Simulate API call
-                await new Promise((r) => setTimeout(r, 1200))
-                const mockUser: User = {
-                    id: '1',
-                    name: 'Alex Morgan',
-                    email,
-                    role: 'proctor',
-                }
-                set({
-                    user: mockUser,
-                    token: 'mock-jwt-token',
-                    isAuthenticated: true,
-                    isLoading: false,
-                })
-            },
+    login: async (email, password) => {
+        set({ isLoading: true, error: null })
 
-            logout: () => {
-                set({ user: null, token: null, isAuthenticated: false })
-            },
+        const { error } = await signInWithEmail(email, password)
 
-            setLoading: (loading) => set({ isLoading: loading }),
-        }),
-        {
-            name: 'aegis-auth',
-            partialize: (state) => ({ user: state.user, token: state.token, isAuthenticated: state.isAuthenticated }),
+        if (error) {
+            set({ isLoading: false, error: error.message })
+            // Re-throw so the form can catch it if needed
+            throw error
         }
-    )
-)
+
+        // Session is set by the onAuthStateChange listener in useAuthInit,
+        // so we don't need to set user here — just clear the loading flag.
+        // (isLoading will be cleared by the listener callback)
+    },
+
+    logout: async () => {
+        set({ isLoading: true, error: null })
+        await signOut()
+        set({ user: null, isAuthenticated: false, isLoading: false, error: null })
+    },
+
+    setUserFromSession: (user) => {
+        set({
+            user,
+            isAuthenticated: user !== null,
+        })
+    },
+
+    setLoading: (loading) => set({ isLoading: loading }),
+
+    clearError: () => set({ error: null }),
+}))

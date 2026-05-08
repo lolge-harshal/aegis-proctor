@@ -2,33 +2,38 @@ import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Mail, Lock, Shield } from 'lucide-react'
-import { useAuthStore } from '@/store/authStore'
+import { useAuth } from '@/features/auth/hooks'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 export function LoginPage() {
-    const [email, setEmail] = useState('proctor@aegis.ai')
-    const [password, setPassword] = useState('password')
-    const [error, setError] = useState('')
+    const [email, setEmail] = useState('')
+    const [password, setPassword] = useState('')
+    const [localError, setLocalError] = useState('')
 
-    const login = useAuthStore((s) => s.login)
-    const isLoading = useAuthStore((s) => s.isLoading)
+    const { login, isLoading, error: authError, clearError } = useAuth()
     const navigate = useNavigate()
     const location = useLocation()
     const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/dashboard'
 
+    // Show either a local validation error or the error from the auth store
+    const displayError = localError || authError
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        setError('')
+        setLocalError('')
+        clearError()
+
         if (!email || !password) {
-            setError('Please fill in all fields.')
+            setLocalError('Please fill in all fields.')
             return
         }
+
         try {
             await login(email, password)
             navigate(from, { replace: true })
         } catch {
-            setError('Invalid credentials. Please try again.')
+            // Error is already stored in authStore.error — no extra handling needed
         }
     }
 
@@ -69,13 +74,13 @@ export function LoginPage() {
                         autoComplete="current-password"
                     />
 
-                    {error && (
+                    {displayError && (
                         <motion.p
                             initial={{ opacity: 0, y: -4 }}
                             animate={{ opacity: 1, y: 0 }}
                             className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2"
                         >
-                            {error}
+                            {displayError}
                         </motion.p>
                     )}
 
