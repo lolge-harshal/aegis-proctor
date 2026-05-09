@@ -1,42 +1,12 @@
 import { motion } from 'framer-motion'
 import { Video, Users, AlertTriangle, CheckCircle } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
+import { useMonitoringStore } from '@/store/monitoringStore'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { useNavigate } from 'react-router-dom'
-
-const STATS = [
-    {
-        label: 'Active Sessions',
-        value: 3,
-        icon: <Video size={20} />,
-        accent: 'indigo' as const,
-        trend: { value: 12, label: 'vs last week' },
-    },
-    {
-        label: 'Total Participants',
-        value: 142,
-        icon: <Users size={20} />,
-        accent: 'cyan' as const,
-        trend: { value: 8, label: 'vs last week' },
-    },
-    {
-        label: 'Flags Raised',
-        value: 17,
-        icon: <AlertTriangle size={20} />,
-        accent: 'amber' as const,
-        trend: { value: -3, label: 'vs last week' },
-    },
-    {
-        label: 'Sessions Completed',
-        value: 89,
-        icon: <CheckCircle size={20} />,
-        accent: 'emerald' as const,
-        trend: { value: 5, label: 'vs last week' },
-    },
-]
 
 const RECENT_SESSIONS = [
     { id: 'S-001', name: 'CS101 Midterm', participants: 48, status: 'live', flags: 2 },
@@ -49,6 +19,44 @@ const RECENT_SESSIONS = [
 export function DashboardPage() {
     const user = useAuthStore((s) => s.user)
     const navigate = useNavigate()
+
+    // Live metrics from realtime monitoring store
+    const activeSessions = useMonitoringStore((s) => s.metrics.activeSessions)
+    const totalFlags = useMonitoringStore((s) => s.metrics.totalFlags)
+    const highSeverityCount = useMonitoringStore((s) => s.metrics.highSeverityCount)
+
+    // Blend static baseline with live deltas so the dashboard feels alive
+    // even before a session is started
+    const STATS = [
+        {
+            label: 'Active Sessions',
+            value: 3 + activeSessions,
+            icon: <Video size={20} />,
+            accent: 'indigo' as const,
+            trend: { value: 12, label: 'vs last week' },
+        },
+        {
+            label: 'Total Participants',
+            value: 142,
+            icon: <Users size={20} />,
+            accent: 'cyan' as const,
+            trend: { value: 8, label: 'vs last week' },
+        },
+        {
+            label: 'Flags Raised',
+            value: 17 + totalFlags,
+            icon: <AlertTriangle size={20} />,
+            accent: 'amber' as const,
+            trend: { value: -3, label: 'vs last week' },
+        },
+        {
+            label: 'Sessions Completed',
+            value: 89,
+            icon: <CheckCircle size={20} />,
+            accent: 'emerald' as const,
+            trend: { value: 5, label: 'vs last week' },
+        },
+    ]
 
     return (
         <div className="space-y-6 max-w-7xl">
@@ -70,12 +78,35 @@ export function DashboardPage() {
                 </Button>
             </motion.div>
 
-            {/* Stats grid */}
+            {/* Stats grid — values update live */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 {STATS.map((stat, i) => (
                     <StatCard key={stat.label} {...stat} index={i} />
                 ))}
             </div>
+
+            {/* High-severity alert banner — only shown when there are live high-severity events */}
+            {highSeverityCount > 0 && (
+                <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/25"
+                >
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                    <p className="text-sm text-rose-300">
+                        <span className="font-semibold">{highSeverityCount} high-severity</span> event
+                        {highSeverityCount !== 1 ? 's' : ''} detected in the current session.
+                    </p>
+                    <Button
+                        variant="danger"
+                        size="sm"
+                        className="ml-auto shrink-0"
+                        onClick={() => navigate('/session/live')}
+                    >
+                        View Session
+                    </Button>
+                </motion.div>
+            )}
 
             {/* Recent sessions */}
             <motion.div
