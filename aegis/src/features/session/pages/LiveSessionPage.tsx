@@ -53,7 +53,7 @@ function engineStatusLabel(status: EngineStatus): string {
 
 export function LiveSessionPage() {
     const user = useAuthStore((s) => s.user)
-    const { status, elapsedSeconds, sessionId, setStatus, setSessionId, incrementElapsed, resetSession } =
+    const { status, elapsedSeconds, sessionId, setStatus, setSessionId, resetSession } =
         useSessionStore()
 
     const [liveSession, setLiveSession] = useState<ExamSessionRow | null>(null)
@@ -64,50 +64,55 @@ export function LiveSessionPage() {
 
     const sessionChannelRef = useRef<ReturnType<typeof subscribeToSession> | null>(null)
     const eventsChannelRef = useRef<ReturnType<typeof subscribeToEvents> | null>(null)
+    // Single timer ref — never create more than one
     const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-    const previewRef = useRef<HTMLVideoElement | null>(null)
+    // Stable ref to the mounted <video> element
+    const videoElRef = useRef<HTMLVideoElement | null>(null)
 
     // ── Monitoring engine ────────────────────────────────────────────────────
     const { startMonitoring, stopMonitoring, engineStatus, latestFrame, attachPreview } =
-        useMonitoring({
-            sessionId,
-            // Realtime events from Supabase already update `events` via
-            // subscribeToEvents — no need to push them again here.
-        })
+        useMonitoring()
 
-    // Attach webcam preview whenever the video ref is set
-    const setPreviewRef = useCallback(
-        (el: HTMLVideoElement | null) => {
-            previewRef.current = el
-            attachPreview(el)
-        },
-        [attachPreview]
-    )
+    // ── Timer — uses getState() so it never captures a stale incrementElapsed ──
+    const startTimer = useCallback(() => {
+        if (timerRef.current !== null) return          // already running
+        timerRef.current = setInterval(() => {
+            useSessionStore.getState().incrementElapsed()
+        }, 1000)
+    }, [])
 
-    // ── Supabase subscription helpers ────────────────────────────────────────
-    const cleanupSubscriptions = useCallback(() => {
-        sessionChannelRef.current?.unsubscribe()
-        sessionChannelRef.current = null
-        eventsChannelRef.current?.unsubscribe()
-        eventsChannelRef.current = null
-        if (timerRef.current) {
+    const stopTimer = useCallback(() => {
+        if (timerRef.current !== null) {
             clearInterval(timerRef.current)
             timerRef.current = null
         }
     }, [])
 
-    const attachSubscriptions = useCallback(
-        (id: string) => {
-            sessionChannelRef.current = subscribeToSession(id, (updated) => {
-                setLiveSession(updated)
-            })
-            eventsChannelRef.current = subscribeToEvents(id, (event) => {
-                setEvents((prev) => [event, ...prev])
-            })
-            timerRef.current = setInterval(incrementElapsed, 1000)
-        },
-        [incrementElapsed]
-    )
+    // ── Supabase channel cleanup ─────────────────────────────────────────────
+    const cleanupSubscriptions = useCallback(() => {
+        sessionChannelRef.current?.unsubscribe()
+        sessionChannelRef.current = null
+        eventsChannelRef.current?.unsubscribe()
+        eventsChannelRef.current = null
+        stopTimer()
+    }, [stopTimer])
+
+    const attachSubscriptions = useCallback((id: string) => {
+        sessionChannelRef.current = subscribeToSession(id, (updated) => {
+            setLiveSession(updated)
+        })
+        eventsChannelRef.current = subscribeToEvents(id, (event) => {
+            setEvents((prev) => [event, ...prev])
+        })
+        startTimer()
+    }, [startTimer])
+
+    // ── Video ref callback — called when the <video> element mounts/unmounts ──
+    const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
+        videoElRef.current = el
+        // If the engine is already running when the element mounts, attach now
+        if (el) attachPreview(el)
+    }, [attachPreview])
 
     // ── Restore session on mount (page refresh while live) ───────────────────
     useEffect(() => {
@@ -116,7 +121,11 @@ export function LiveSessionPage() {
                 .then((data) => setEvents(data))
                 .catch(() => { })
             attachSubscriptions(sessionId)
-            startMonitoring().catch(() => { })
+            startMonitoring(sessionId)
+                .then(() => {
+                    if (videoElRef.current) attachPreview(videoElRef.current)
+                })
+                .catch(() => { })
         }
         return cleanupSubscriptions
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -130,7 +139,6 @@ export function LiveSessionPage() {
         setStatus('connecting')
 
         try {
-            // Request fullscreen for the exam environment
             await requestFullscreen()
 
             const session = await startSession(user.id)
@@ -139,15 +147,19 @@ export function LiveSessionPage() {
             setStatus('live')
             attachSubscriptions(session.id)
 
-            // Start AI monitoring engine
-            await startMonitoring()
+            // Start AI engine — pass sessionId directly, no React render needed
+            await startMonitoring(session.id)
+
+            // Attach the stream to the preview element that is now mounted
+            if (videoElRef.current) attachPreview(videoElRef.current)
         } catch (err) {
             setStartError(err instanceof Error ? err.message : 'Failed to start session.')
             setStatus('idle')
+            stopTimer()
         } finally {
             setIsStarting(false)
         }
-    }, [user, setStatus, setSessionId, attachSubscriptions, startMonitoring])
+    }, [user, setStatus, setSessionId, attachSubscriptions, startMonitoring, attachPreview, stopTimer])
 
     // ── End session ──────────────────────────────────────────────────────────
     const handleEnd = useCallback(async () => {
@@ -159,7 +171,7 @@ export function LiveSessionPage() {
         try {
             await endSession(sessionId, 'completed')
         } catch {
-            // Best-effort
+            // best-effort
         } finally {
             setIsEnding(false)
             setLiveSession(null)
@@ -253,23 +265,20 @@ export function LiveSessionPage() {
                         <span>{formatDuration(elapsedSeconds)}</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button
-                        variant="danger"
-                        size="sm"
-                        icon={<Square size={14} />}
-                        loading={isEnding}
-                        onClick={handleEnd}
-                    >
-                        {isEnding ? 'Ending...' : 'End Session'}
-                    </Button>
-                </div>
+                <Button
+                    variant="danger"
+                    size="sm"
+                    icon={<Square size={14} />}
+                    loading={isEnding}
+                    onClick={handleEnd}
+                >
+                    {isEnding ? 'Ending...' : 'End Session'}
+                </Button>
             </motion.div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                {/* Left column: webcam + AI status */}
+                {/* Left: webcam + AI status */}
                 <div className="space-y-4">
-                    {/* Webcam preview */}
                     <Card>
                         <CardHeader>
                             <div className="flex items-center justify-between">
@@ -290,13 +299,12 @@ export function LiveSessionPage() {
                         <CardBody className="p-2">
                             <div className="relative bg-[#0a0a0f] rounded-lg overflow-hidden aspect-video">
                                 <video
-                                    ref={setPreviewRef}
+                                    ref={setVideoRef}
                                     autoPlay
                                     muted
                                     playsInline
                                     className="w-full h-full object-cover"
                                 />
-                                {/* Head pose overlay */}
                                 {latestFrame && latestFrame.faceCount > 0 && latestFrame.headPose && (
                                     <div className="absolute bottom-2 left-2 bg-black/60 rounded px-2 py-1 text-[10px] text-slate-300 font-mono space-y-0.5">
                                         <div>Yaw:   {latestFrame.headPose.yaw.toFixed(1)}°</div>
@@ -315,18 +323,15 @@ export function LiveSessionPage() {
                         </CardBody>
                     </Card>
 
-                    {/* AI engine status */}
                     <Card>
                         <CardBody className="py-3">
                             <div className="flex items-center gap-2">
-                                <div
-                                    className={`w-2 h-2 rounded-full shrink-0 ${engineStatus.state === 'running'
-                                            ? 'bg-emerald-500 animate-pulse'
-                                            : engineStatus.state === 'error'
-                                                ? 'bg-rose-500'
-                                                : 'bg-slate-500'
-                                        }`}
-                                />
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${engineStatus.state === 'running'
+                                    ? 'bg-emerald-500 animate-pulse'
+                                    : engineStatus.state === 'error'
+                                        ? 'bg-rose-500'
+                                        : 'bg-slate-500'
+                                    }`} />
                                 <p className="text-xs text-slate-400">
                                     {engineStatusLabel(engineStatus)}
                                 </p>
@@ -335,40 +340,19 @@ export function LiveSessionPage() {
                     </Card>
                 </div>
 
-                {/* Right column: stats + event feed */}
+                {/* Right: stats + event feed */}
                 <div className="lg:col-span-2 space-y-4">
-                    {/* Stats row */}
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                         {[
                             {
                                 label: 'Risk Score',
                                 value: `${Math.round(riskScore)}%`,
-                                accent:
-                                    riskScore >= 60
-                                        ? 'text-rose-400'
-                                        : riskScore >= 30
-                                            ? 'text-amber-400'
-                                            : 'text-emerald-400',
+                                accent: riskScore >= 60 ? 'text-rose-400' : riskScore >= 30 ? 'text-amber-400' : 'text-emerald-400',
                                 icon: <ShieldAlert size={16} />,
                             },
-                            {
-                                label: 'Total Flags',
-                                value: totalWarnings,
-                                accent: 'text-amber-400',
-                                icon: <AlertTriangle size={16} />,
-                            },
-                            {
-                                label: 'Tab Switches',
-                                value: tabSwitches,
-                                accent: 'text-cyan-400',
-                                icon: <Video size={16} />,
-                            },
-                            {
-                                label: 'Fullscreen Exits',
-                                value: fullscreenViolations,
-                                accent: 'text-rose-400',
-                                icon: <Wifi size={16} />,
-                            },
+                            { label: 'Total Flags', value: totalWarnings, accent: 'text-amber-400', icon: <AlertTriangle size={16} /> },
+                            { label: 'Tab Switches', value: tabSwitches, accent: 'text-cyan-400', icon: <Video size={16} /> },
+                            { label: 'Fullscreen Exits', value: fullscreenViolations, accent: 'text-rose-400', icon: <Wifi size={16} /> },
                         ].map((s, i) => (
                             <motion.div
                                 key={s.label}
@@ -389,20 +373,12 @@ export function LiveSessionPage() {
                         ))}
                     </div>
 
-                    {/* Risk score bar */}
+                    {/* Risk bar */}
                     <Card>
                         <CardBody className="py-3 space-y-2">
                             <div className="flex justify-between text-xs text-slate-400">
                                 <span>Session Risk Score</span>
-                                <span
-                                    className={
-                                        riskScore >= 60
-                                            ? 'text-rose-400'
-                                            : riskScore >= 30
-                                                ? 'text-amber-400'
-                                                : 'text-emerald-400'
-                                    }
-                                >
+                                <span className={riskScore >= 60 ? 'text-rose-400' : riskScore >= 30 ? 'text-amber-400' : 'text-emerald-400'}>
                                     {Math.round(riskScore)}%
                                 </span>
                             </div>
@@ -410,24 +386,18 @@ export function LiveSessionPage() {
                                 <motion.div
                                     animate={{ width: `${riskScore}%` }}
                                     transition={{ duration: 0.5 }}
-                                    className={`h-full rounded-full ${riskScore >= 60
-                                            ? 'bg-rose-500'
-                                            : riskScore >= 30
-                                                ? 'bg-amber-500'
-                                                : 'bg-emerald-500'
+                                    className={`h-full rounded-full ${riskScore >= 60 ? 'bg-rose-500' : riskScore >= 30 ? 'bg-amber-500' : 'bg-emerald-500'
                                         }`}
                                 />
                             </div>
                         </CardBody>
                     </Card>
 
-                    {/* Live event feed */}
+                    {/* Event feed */}
                     <Card>
                         <CardHeader>
                             <div className="flex items-center justify-between">
-                                <h2 className="text-base font-semibold text-white">
-                                    Live Event Feed
-                                </h2>
+                                <h2 className="text-base font-semibold text-white">Live Event Feed</h2>
                                 <Badge variant="slate">{events.length} events</Badge>
                             </div>
                         </CardHeader>
@@ -435,9 +405,7 @@ export function LiveSessionPage() {
                             {events.length === 0 ? (
                                 <div className="flex flex-col items-center justify-center py-10 text-slate-500 space-y-2">
                                     <ShieldAlert size={28} className="opacity-40" />
-                                    <p className="text-sm">
-                                        No events detected yet. Monitoring is active.
-                                    </p>
+                                    <p className="text-sm">No events detected yet. Monitoring is active.</p>
                                 </div>
                             ) : (
                                 <div className="divide-y divide-[#2a2a3a]">
@@ -449,27 +417,18 @@ export function LiveSessionPage() {
                                             className="flex items-center justify-between px-5 py-3 hover:bg-[#1a1a26] transition-colors"
                                         >
                                             <div className="flex items-center gap-3">
-                                                <div
-                                                    className={`w-2 h-2 rounded-full shrink-0 ${event.severity === 'high'
-                                                            ? 'bg-rose-500'
-                                                            : event.severity === 'medium'
-                                                                ? 'bg-amber-500'
-                                                                : 'bg-slate-500'
-                                                        }`}
-                                                />
+                                                <div className={`w-2 h-2 rounded-full shrink-0 ${event.severity === 'high' ? 'bg-rose-500'
+                                                    : event.severity === 'medium' ? 'bg-amber-500'
+                                                        : 'bg-slate-500'
+                                                    }`} />
                                                 <div>
                                                     <p className="text-sm font-medium text-slate-200">
-                                                        {EVENT_LABELS[event.event_type] ??
-                                                            event.event_type}
+                                                        {EVENT_LABELS[event.event_type] ?? event.event_type}
                                                     </p>
                                                     <p className="text-xs text-slate-500">
-                                                        {new Date(
-                                                            event.created_at
-                                                        ).toLocaleTimeString()}
+                                                        {new Date(event.created_at).toLocaleTimeString()}
                                                         {event.confidence_score != null &&
-                                                            ` · ${Math.round(
-                                                                event.confidence_score * 100
-                                                            )}% confidence`}
+                                                            ` · ${Math.round(event.confidence_score * 100)}% confidence`}
                                                     </p>
                                                 </div>
                                             </div>
@@ -485,7 +444,6 @@ export function LiveSessionPage() {
                 </div>
             </div>
 
-            {/* Session ID footer */}
             <p className="text-xs text-slate-600 text-center font-mono">
                 Session ID: {sessionId}
             </p>

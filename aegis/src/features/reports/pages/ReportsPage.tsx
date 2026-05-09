@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart3, Download, Filter, TrendingUp, AlertTriangle, Users, Clock } from 'lucide-react'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
@@ -6,8 +7,14 @@ import { Badge } from '@/components/ui/Badge'
 import { StatCard } from '@/components/ui/StatCard'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { useReportsData } from '@/features/reports/hooks/useReportsData'
+import { downloadCsv } from '@/lib/exportCsv'
 import { formatDate, formatDuration } from '@/lib/utils'
-import type { ExamSessionRow } from '@/services/supabase'
+import type { ExamSessionRow, MonitoringEventRow } from '@/services/supabase'
+import type { SessionWithEvents } from '@/features/reports/hooks/useReportsData'
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function getRiskVariant(riskScore: number): 'rose' | 'amber' | 'emerald' {
     if (riskScore >= 60) return 'rose'
@@ -29,8 +36,65 @@ function getSessionDuration(session: ExamSessionRow): string {
     return formatDuration(diffSeconds)
 }
 
+/** Build a flat CSV row for a single monitoring event. */
+function eventToCsvRow(event: MonitoringEventRow, session: ExamSessionRow) {
+    return {
+        session_id: session.id,
+        session_date: formatDate(session.created_at),
+        event_id: event.id,
+        event_type: event.event_type,
+        severity: event.severity,
+        confidence_score: event.confidence_score ?? '',
+        is_suspicious: event.is_suspicious,
+        detected_at: new Date(event.created_at).toLocaleString(),
+    }
+}
+
+/** Build a summary CSV row for a single session. */
+function sessionToCsvRow(session: ExamSessionRow, eventCount: number) {
+    return {
+        session_id: session.id,
+        date: formatDate(session.created_at),
+        duration: getSessionDuration(session),
+        status: session.status,
+        risk_score: `${Math.round(session.risk_score)}%`,
+        risk_level: getRiskLabel(session.risk_score),
+        total_flags: session.total_warnings,
+        tab_switches: session.tab_switch_count,
+        fullscreen_violations: session.fullscreen_violations,
+        event_count: eventCount,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function ReportsPage() {
     const { summary, isLoading, error } = useReportsData()
+
+    // ── Export all sessions as a summary CSV ─────────────────────────────────
+    const handleExportAll = useCallback(() => {
+        if (!summary) return
+        const rows = summary.sessionRows.map(({ session, events }) =>
+            sessionToCsvRow(session, events.length)
+        )
+        downloadCsv(`aegis-sessions-${new Date().toISOString().slice(0, 10)}.csv`, rows)
+    }, [summary])
+
+    // ── Export a single session's events as CSV ───────────────────────────────
+    const handleExportSession = useCallback((row: SessionWithEvents) => {
+        if (row.events.length === 0) {
+            // Export session summary row even if no events
+            downloadCsv(
+                `aegis-session-${row.session.id.slice(0, 8)}.csv`,
+                [sessionToCsvRow(row.session, 0)]
+            )
+            return
+        }
+        const csvRows = row.events.map((e) => eventToCsvRow(e, row.session))
+        downloadCsv(`aegis-session-${row.session.id.slice(0, 8)}.csv`, csvRows)
+    }, [])
 
     if (isLoading) {
         return (
@@ -54,30 +118,10 @@ export function ReportsPage() {
     if (!summary) return null
 
     const REPORT_STATS = [
-        {
-            label: 'Total Sessions',
-            value: summary.totalSessions,
-            icon: <BarChart3 size={20} />,
-            accent: 'indigo' as const,
-        },
-        {
-            label: 'Avg. Risk Score',
-            value: `${summary.avgRiskScore}%`,
-            icon: <TrendingUp size={20} />,
-            accent: 'cyan' as const,
-        },
-        {
-            label: 'Total Flags',
-            value: summary.totalFlags,
-            icon: <AlertTriangle size={20} />,
-            accent: 'amber' as const,
-        },
-        {
-            label: 'Sessions w/ Flags',
-            value: summary.sessionsWithFlags,
-            icon: <Users size={20} />,
-            accent: 'emerald' as const,
-        },
+        { label: 'Total Sessions', value: summary.totalSessions, icon: <BarChart3 size={20} />, accent: 'indigo' as const },
+        { label: 'Avg. Risk Score', value: `${summary.avgRiskScore}%`, icon: <TrendingUp size={20} />, accent: 'cyan' as const },
+        { label: 'Total Flags', value: summary.totalFlags, icon: <AlertTriangle size={20} />, accent: 'amber' as const },
+        { label: 'Sessions w/ Flags', value: summary.sessionsWithFlags, icon: <Users size={20} />, accent: 'emerald' as const },
     ]
 
     return (
@@ -98,8 +142,14 @@ export function ReportsPage() {
                     <Button variant="secondary" size="sm" icon={<Filter size={14} />}>
                         Filter
                     </Button>
-                    <Button variant="secondary" size="sm" icon={<Download size={14} />}>
-                        Export
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Download size={14} />}
+                        onClick={handleExportAll}
+                        disabled={summary.sessionRows.length === 0}
+                    >
+                        Export All
                     </Button>
                 </div>
             </motion.div>
@@ -159,9 +209,7 @@ export function ReportsPage() {
                     <Card className="h-full">
                         <CardHeader>
                             <div className="flex items-center justify-between">
-                                <h2 className="text-base font-semibold text-white">
-                                    Session Activity
-                                </h2>
+                                <h2 className="text-base font-semibold text-white">Session Activity</h2>
                                 <div className="flex items-center gap-1.5 text-slate-400 text-xs">
                                     <Clock size={13} />
                                     <span>Last 14 days</span>
@@ -205,15 +253,7 @@ export function ReportsPage() {
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b border-[#2a2a3a]">
-                                        {[
-                                            'Session ID',
-                                            'Date',
-                                            'Duration',
-                                            'Flags',
-                                            'Risk Score',
-                                            'Risk',
-                                            '',
-                                        ].map((h) => (
+                                        {['Session ID', 'Date', 'Duration', 'Flags', 'Risk Score', 'Risk', ''].map((h) => (
                                             <th
                                                 key={h}
                                                 className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider"
@@ -224,31 +264,29 @@ export function ReportsPage() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-[#2a2a3a]">
-                                    {summary.sessionRows.map(({ session, events }) => (
+                                    {summary.sessionRows.map((row) => (
                                         <tr
-                                            key={session.id}
+                                            key={row.session.id}
                                             className="hover:bg-[#1a1a26] transition-colors"
                                         >
                                             <td className="px-5 py-3.5 text-slate-400 font-mono text-xs">
-                                                {session.id.slice(0, 8)}…
+                                                {row.session.id.slice(0, 8)}…
                                             </td>
                                             <td className="px-5 py-3.5 text-slate-400">
-                                                {formatDate(session.created_at)}
+                                                {formatDate(row.session.created_at)}
                                             </td>
                                             <td className="px-5 py-3.5 text-slate-400">
-                                                {getSessionDuration(session)}
+                                                {getSessionDuration(row.session)}
                                             </td>
                                             <td className="px-5 py-3.5 text-slate-300">
-                                                {events.length}
+                                                {row.events.length}
                                             </td>
                                             <td className="px-5 py-3.5 text-slate-300">
-                                                {Math.round(session.risk_score)}%
+                                                {Math.round(row.session.risk_score)}%
                                             </td>
                                             <td className="px-5 py-3.5">
-                                                <Badge
-                                                    variant={getRiskVariant(session.risk_score)}
-                                                >
-                                                    {getRiskLabel(session.risk_score)}
+                                                <Badge variant={getRiskVariant(row.session.risk_score)}>
+                                                    {getRiskLabel(row.session.risk_score)}
                                                 </Badge>
                                             </td>
                                             <td className="px-5 py-3.5">
@@ -256,6 +294,7 @@ export function ReportsPage() {
                                                     variant="ghost"
                                                     size="sm"
                                                     icon={<Download size={13} />}
+                                                    onClick={() => handleExportSession(row)}
                                                 >
                                                     Export
                                                 </Button>

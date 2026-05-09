@@ -47,7 +47,6 @@ export class FaceDetectionService {
                 runningMode: 'VIDEO',
                 numFaces: 4,           // detect up to 4 faces
                 minFaceDetectionConfidence: 0.5,
-                minFacePresenceScore: 0.5,
                 minTrackingConfidence: 0.5,
                 outputFaceBlendshapes: false,
                 outputFacialTransformationMatrixes: true,

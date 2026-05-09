@@ -5,81 +5,55 @@ import { recordDetection } from '@/services/supabase'
 import type { MonitoringEvent, EngineStatus, FaceFrame, MonitoringConfig } from '@/monitoring/types'
 
 interface UseMonitoringOptions {
-    sessionId: string | null
-    /** Called for every dispatched event (after Supabase write). */
     onEvent?: (event: MonitoringEvent) => void
-    /** Called when engine status changes. */
     onStatusChange?: (status: EngineStatus) => void
     config?: Partial<MonitoringConfig>
 }
 
 interface UseMonitoringResult {
-    /** Start the engine — requests camera, loads model, begins detection. */
-    startMonitoring: () => Promise<void>
-    /** Stop the engine and release all resources. */
+    startMonitoring: (sessionId: string) => Promise<void>
     stopMonitoring: () => void
     engineStatus: EngineStatus
-    /** Latest face frame — useful for a live head-pose overlay. */
     latestFrame: FaceFrame | null
-    /** Attach the webcam stream to a <video> element for preview. */
     attachPreview: (el: HTMLVideoElement | null) => void
 }
 
-/**
- * useMonitoring — the primary React integration hook for the detection engine.
- *
- * Lifecycle:
- *  - Creates a DetectionEngine + EventDispatcher on mount (stable refs).
- *  - `startMonitoring()` starts the engine when the session is live.
- *  - Engine events are written to Supabase via `recordDetection`.
- *  - Everything is cleaned up on unmount or when `stopMonitoring()` is called.
- *
- * @example
- * const { startMonitoring, stopMonitoring, attachPreview, engineStatus } =
- *   useMonitoring({ sessionId, onEvent: (e) => console.log(e) })
- */
 export function useMonitoring({
-    sessionId,
     onEvent,
     onStatusChange,
     config,
-}: UseMonitoringOptions): UseMonitoringResult {
-    const dispatcherRef = useRef<EventDispatcher | null>(null)
+}: UseMonitoringOptions = {}): UseMonitoringResult {
+    // ── Create dispatcher ONCE via useRef initializer ────────────────────────
+    // useRef(() => ...) runs the factory exactly once per component instance,
+    // synchronously, before any render. It is NOT affected by React Strict Mode
+    // double-invocation (which only affects useEffect). This guarantees
+    // dispatcherRef.current is always non-null when startMonitoring is called.
+    const dispatcherRef = useRef<EventDispatcher>(new EventDispatcher())
     const engineRef = useRef<DetectionEngine | null>(null)
 
     const [engineStatus, setEngineStatus] = useState<EngineStatus>({ state: 'idle' })
     const [latestFrame, setLatestFrame] = useState<FaceFrame | null>(null)
 
-    // Stable callback refs — avoids re-subscribing on every render
+    // Stable callback refs so subscriptions never need to be re-registered
     const onEventRef = useRef(onEvent)
     const onStatusChangeRef = useRef(onStatusChange)
-    useEffect(() => { onEventRef.current = onEvent }, [onEvent])
-    useEffect(() => { onStatusChangeRef.current = onStatusChange }, [onStatusChange])
+    onEventRef.current = onEvent
+    onStatusChangeRef.current = onStatusChange
 
-    // ── Create dispatcher + engine once per sessionId ────────────────────────
+    // ── Wire dispatcher → React state (once on mount, cleanup on unmount) ───
     useEffect(() => {
-        if (!sessionId) return
+        const dispatcher = dispatcherRef.current
 
-        const dispatcher = new EventDispatcher()
-        const engine = new DetectionEngine(sessionId, dispatcher, config)
-
-        dispatcherRef.current = dispatcher
-        engineRef.current = engine
-
-        // Subscribe: status changes
         const unsubStatus = dispatcher.on('status-change', (status) => {
             setEngineStatus(status)
             onStatusChangeRef.current?.(status)
         })
 
-        // Subscribe: face frames (for UI overlay)
         const unsubFrame = dispatcher.on('frame', (frame) => {
             setLatestFrame(frame)
         })
 
-        // Subscribe: detection events → Supabase + caller callback
         const unsubEvent = dispatcher.on('event', (event) => {
-            // Fire-and-forget write to Supabase
             recordDetection({
                 sessionId: event.sessionId,
                 eventType: event.eventType,
@@ -90,7 +64,6 @@ export function useMonitoring({
             }).catch((err) => {
                 console.warn('[useMonitoring] Failed to record event:', err)
             })
-
             onEventRef.current?.(event)
         })
 
@@ -98,32 +71,38 @@ export function useMonitoring({
             unsubStatus()
             unsubFrame()
             unsubEvent()
-            engine.stop()
-            dispatcher.clear()
-            dispatcherRef.current = null
+            // Stop engine on unmount — dispatcher itself lives as long as the ref
+            engineRef.current?.stop()
             engineRef.current = null
         }
-        // config is intentionally excluded — changing config mid-session
-        // would require a full engine restart; handle that at the call site.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionId])
+    }, []) // mount/unmount only — dispatcher ref is stable
 
     // ── Public API ───────────────────────────────────────────────────────────
 
-    const startMonitoring = useCallback(async () => {
-        if (!engineRef.current) {
-            throw new Error('Engine not ready — sessionId may be null')
+    const startMonitoring = useCallback(async (sessionId: string) => {
+        // Stop any previous engine cleanly
+        if (engineRef.current) {
+            engineRef.current.stop()
+            engineRef.current = null
         }
-        await engineRef.current.start()
-    }, [])
+
+        const engine = new DetectionEngine(
+            sessionId,
+            dispatcherRef.current,
+            config ?? {}
+        )
+        engineRef.current = engine
+        await engine.start()
+    }, [config])
 
     const stopMonitoring = useCallback(() => {
         engineRef.current?.stop()
+        engineRef.current = null
     }, [])
 
     const attachPreview = useCallback((el: HTMLVideoElement | null) => {
-        if (!el || !engineRef.current) return
-        engineRef.current.webcam.attachPreview(el)
+        if (!el) return
+        engineRef.current?.webcam.attachPreview(el)
     }, [])
 
     return { startMonitoring, stopMonitoring, engineStatus, latestFrame, attachPreview }
