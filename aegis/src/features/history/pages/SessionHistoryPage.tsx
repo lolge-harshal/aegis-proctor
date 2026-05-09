@@ -1,30 +1,68 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { Search, Calendar, ChevronRight, Video } from 'lucide-react'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { PageSpinner } from '@/components/ui/Spinner'
+import { useSessions } from '@/features/sessions/hooks/useSessions'
+import { formatDate, formatDuration } from '@/lib/utils'
+import type { ExamSessionRow } from '@/services/supabase'
 
-const ALL_SESSIONS = [
-    { id: 'S-089', name: 'CS101 Midterm', date: 'May 7, 2026', duration: '2h 15m', participants: 48, flags: 12, status: 'completed' },
-    { id: 'S-088', name: 'Data Structures Final', date: 'May 6, 2026', duration: '3h 00m', participants: 35, flags: 3, status: 'completed' },
-    { id: 'S-087', name: 'Algorithms Quiz', date: 'May 5, 2026', duration: '1h 30m', participants: 22, flags: 7, status: 'completed' },
-    { id: 'S-086', name: 'OS Concepts Exam', date: 'May 4, 2026', duration: '2h 45m', participants: 60, flags: 1, status: 'completed' },
-    { id: 'S-085', name: 'Networks Midterm', date: 'May 3, 2026', duration: '2h 00m', participants: 41, flags: 9, status: 'completed' },
-    { id: 'S-084', name: 'Database Systems Quiz', date: 'May 2, 2026', duration: '1h 00m', participants: 29, flags: 0, status: 'completed' },
-    { id: 'S-083', name: 'Software Engineering Final', date: 'May 1, 2026', duration: '3h 30m', participants: 55, flags: 14, status: 'completed' },
-    { id: 'S-082', name: 'Computer Graphics Exam', date: 'Apr 30, 2026', duration: '2h 00m', participants: 18, flags: 2, status: 'completed' },
-]
+function getSessionDuration(session: ExamSessionRow): string {
+    if (!session.started_at || !session.ended_at) return '—'
+    const diffSeconds = Math.floor(
+        (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 1000
+    )
+    return formatDuration(diffSeconds)
+}
+
+function getStatusVariant(status: ExamSessionRow['status']) {
+    if (status === 'active') return 'rose'
+    if (status === 'completed') return 'emerald'
+    return 'slate'
+}
 
 export function SessionHistoryPage() {
     const [query, setQuery] = useState('')
+    const { sessions, isLoading, error } = useSessions()
 
-    const filtered = ALL_SESSIONS.filter(
-        (s) =>
-            s.name.toLowerCase().includes(query.toLowerCase()) ||
-            s.id.toLowerCase().includes(query.toLowerCase())
+    // Only show non-active (historical) sessions, newest first
+    const historicalSessions = useMemo(
+        () => sessions.filter((s) => s.status !== 'active'),
+        [sessions]
     )
+
+    const filtered = useMemo(() => {
+        const q = query.toLowerCase()
+        if (!q) return historicalSessions
+        return historicalSessions.filter(
+            (s) =>
+                s.id.toLowerCase().includes(q) ||
+                s.status.toLowerCase().includes(q) ||
+                formatDate(s.created_at).toLowerCase().includes(q)
+        )
+    }, [historicalSessions, query])
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <PageSpinner />
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="text-center space-y-2">
+                    <p className="text-rose-400 font-medium">Failed to load session history</p>
+                    <p className="text-slate-500 text-sm">{error}</p>
+                </div>
+            </div>
+        )
+    }
 
     return (
         <div className="space-y-6 max-w-5xl">
@@ -36,11 +74,13 @@ export function SessionHistoryPage() {
             >
                 <div>
                     <h1 className="text-2xl font-bold text-white">Session History</h1>
-                    <p className="text-slate-400 text-sm mt-0.5">Browse and review all past proctoring sessions.</p>
+                    <p className="text-slate-400 text-sm mt-0.5">
+                        Browse and review all past proctoring sessions.
+                    </p>
                 </div>
                 <div className="flex items-center gap-2 text-slate-400 text-sm">
                     <Calendar size={15} />
-                    <span>{ALL_SESSIONS.length} sessions total</span>
+                    <span>{historicalSessions.length} sessions total</span>
                 </div>
             </motion.div>
 
@@ -51,7 +91,7 @@ export function SessionHistoryPage() {
                 transition={{ delay: 0.1 }}
             >
                 <Input
-                    placeholder="Search by session name or ID..."
+                    placeholder="Search by session ID, status, or date..."
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     icon={<Search size={15} />}
@@ -72,9 +112,13 @@ export function SessionHistoryPage() {
                     </CardHeader>
                     <CardBody className="p-0">
                         {filtered.length === 0 ? (
-                            <div className="text-center py-12 text-slate-500">
-                                <Video size={32} className="mx-auto mb-3 opacity-40" />
-                                <p>No sessions match your search.</p>
+                            <div className="text-center py-12 text-slate-500 space-y-2">
+                                <Video size={32} className="mx-auto opacity-40" />
+                                <p className="text-sm">
+                                    {query
+                                        ? 'No sessions match your search.'
+                                        : 'No completed sessions yet.'}
+                                </p>
                             </div>
                         ) : (
                             <div className="divide-y divide-[#2a2a3a]">
@@ -91,26 +135,39 @@ export function SessionHistoryPage() {
                                                 <Video size={16} className="text-indigo-400" />
                                             </div>
                                             <div className="min-w-0">
-                                                <p className="text-sm font-medium text-slate-200 truncate">{session.name}</p>
-                                                <div className="flex items-center gap-2 mt-0.5">
-                                                    <span className="text-xs text-slate-500 font-mono">{session.id}</span>
+                                                <p className="text-sm font-medium text-slate-200 truncate">
+                                                    Exam Session
+                                                </p>
+                                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                                    <span className="text-xs text-slate-500 font-mono">
+                                                        {session.id.slice(0, 8)}…
+                                                    </span>
                                                     <span className="text-slate-600">·</span>
-                                                    <span className="text-xs text-slate-500">{session.date}</span>
+                                                    <span className="text-xs text-slate-500">
+                                                        {formatDate(session.created_at)}
+                                                    </span>
                                                     <span className="text-slate-600">·</span>
-                                                    <span className="text-xs text-slate-500">{session.duration}</span>
+                                                    <span className="text-xs text-slate-500">
+                                                        {getSessionDuration(session)}
+                                                    </span>
                                                 </div>
                                             </div>
                                         </div>
 
                                         <div className="flex items-center gap-3 shrink-0">
                                             <span className="text-xs text-slate-400 hidden sm:block">
-                                                {session.participants} participants
+                                                Risk: {Math.round(session.risk_score)}%
                                             </span>
-                                            {session.flags > 0 ? (
-                                                <Badge variant="amber">{session.flags} flags</Badge>
+                                            {session.total_warnings > 0 ? (
+                                                <Badge variant="amber">
+                                                    {session.total_warnings} flags
+                                                </Badge>
                                             ) : (
                                                 <Badge variant="emerald">Clean</Badge>
                                             )}
+                                            <Badge variant={getStatusVariant(session.status)}>
+                                                {session.status}
+                                            </Badge>
                                             <Button
                                                 variant="ghost"
                                                 size="sm"

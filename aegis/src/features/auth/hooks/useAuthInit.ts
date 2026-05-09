@@ -1,7 +1,6 @@
 import { useEffect } from 'react'
 import { onAuthStateChange, fetchProfile } from '@/services/supabase'
 import { useAuthStore } from '@/store/authStore'
-import type { UserRole } from '@/services/supabase'
 
 /**
  * Bootstraps the auth state from Supabase on app mount.
@@ -24,14 +23,15 @@ export function useAuthInit() {
                 return
             }
 
-            // Fetch the public profile to get role + display name
+            // Fetch the public profile to get display name + avatar
             const { data: profile } = await fetchProfile(session.user.id)
 
             setUserFromSession({
                 id: session.user.id,
                 email: session.user.email ?? '',
                 name: profile?.full_name ?? session.user.email ?? 'User',
-                role: (profile?.role ?? 'proctor') as UserRole,
+                // profiles table has no role column — default to 'proctor'
+                role: 'proctor',
                 avatarUrl: profile?.avatar_url ?? undefined,
             })
             setLoading(false)
