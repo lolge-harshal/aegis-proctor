@@ -64,6 +64,7 @@ export type {
     SessionStatus,
     EventType,
     EventSeverity,
+    UserRole,
     EventSnapshot,
     Tables,
     TablesInsert,

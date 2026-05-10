@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { signInWithEmail, signOut } from '@/services/supabase'
+import type { UserRole as DBUserRole } from '@/services/supabase'
 
-export type UserRole = 'admin' | 'proctor' | 'candidate'
+export type UserRole = DBUserRole
 
 export interface User {
     id: string
