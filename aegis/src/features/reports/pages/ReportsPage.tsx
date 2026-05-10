@@ -1,37 +1,129 @@
+import { useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { BarChart3, Download, Filter, TrendingUp, AlertTriangle, Users, Clock } from 'lucide-react'
 import { Card, CardHeader, CardBody } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { StatCard } from '@/components/ui/StatCard'
+import { PageSpinner } from '@/components/ui/Spinner'
+import { useReportsData } from '@/features/reports/hooks/useReportsData'
+import { downloadCsv } from '@/lib/exportCsv'
+import { formatDate, formatDuration } from '@/lib/utils'
+import type { ExamSessionRow, MonitoringEventRow } from '@/services/supabase'
+import type { SessionWithEvents } from '@/features/reports/hooks/useReportsData'
 
-const REPORT_STATS = [
-    { label: 'Total Sessions', value: 89, icon: <BarChart3 size={20} />, accent: 'indigo' as const },
-    { label: 'Avg. Risk Score', value: '23%', icon: <TrendingUp size={20} />, accent: 'cyan' as const },
-    { label: 'Total Flags', value: 214, icon: <AlertTriangle size={20} />, accent: 'amber' as const },
-    { label: 'Participants Tested', value: '1.2k', icon: <Users size={20} />, accent: 'emerald' as const },
-]
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const FLAG_TYPES = [
-    { label: 'Tab Switch', count: 87, pct: 41 },
-    { label: 'Face Not Visible', count: 54, pct: 25 },
-    { label: 'Multiple Faces', count: 38, pct: 18 },
-    { label: 'Phone Detected', count: 21, pct: 10 },
-    { label: 'Audio Anomaly', count: 14, pct: 6 },
-]
+function getRiskVariant(riskScore: number): 'rose' | 'amber' | 'emerald' {
+    if (riskScore >= 60) return 'rose'
+    if (riskScore >= 30) return 'amber'
+    return 'emerald'
+}
 
-const RECENT_REPORTS = [
-    { id: 'R-089', session: 'CS101 Midterm', date: 'May 7, 2026', participants: 48, flags: 12, risk: 'high' },
-    { id: 'R-088', session: 'Data Structures Final', date: 'May 6, 2026', participants: 35, flags: 3, risk: 'low' },
-    { id: 'R-087', session: 'Algorithms Quiz', date: 'May 5, 2026', participants: 22, flags: 7, risk: 'medium' },
-    { id: 'R-086', session: 'OS Concepts Exam', date: 'May 4, 2026', participants: 60, flags: 1, risk: 'low' },
-    { id: 'R-085', session: 'Networks Midterm', date: 'May 3, 2026', participants: 41, flags: 9, risk: 'medium' },
-]
+function getRiskLabel(riskScore: number): string {
+    if (riskScore >= 60) return 'high'
+    if (riskScore >= 30) return 'medium'
+    return 'low'
+}
 
-const riskVariant = (risk: string) =>
-    risk === 'high' ? 'rose' : risk === 'medium' ? 'amber' : 'emerald'
+function getSessionDuration(session: ExamSessionRow): string {
+    if (!session.started_at || !session.ended_at) return '—'
+    const diffSeconds = Math.floor(
+        (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 1000
+    )
+    return formatDuration(diffSeconds)
+}
+
+/** Build a flat CSV row for a single monitoring event. */
+function eventToCsvRow(event: MonitoringEventRow, session: ExamSessionRow) {
+    return {
+        session_id: session.id,
+        session_date: formatDate(session.created_at),
+        event_id: event.id,
+        event_type: event.event_type,
+        severity: event.severity,
+        confidence_score: event.confidence_score ?? '',
+        is_suspicious: event.is_suspicious,
+        detected_at: new Date(event.created_at).toLocaleString(),
+    }
+}
+
+/** Build a summary CSV row for a single session. */
+function sessionToCsvRow(session: ExamSessionRow, eventCount: number) {
+    return {
+        session_id: session.id,
+        date: formatDate(session.created_at),
+        duration: getSessionDuration(session),
+        status: session.status,
+        risk_score: `${Math.round(session.risk_score)}%`,
+        risk_level: getRiskLabel(session.risk_score),
+        total_flags: session.total_warnings,
+        tab_switches: session.tab_switch_count,
+        fullscreen_violations: session.fullscreen_violations,
+        event_count: eventCount,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export function ReportsPage() {
+    const { summary, isLoading, error } = useReportsData()
+
+    // ── Export all sessions as a summary CSV ─────────────────────────────────
+    const handleExportAll = useCallback(() => {
+        if (!summary) return
+        const rows = summary.sessionRows.map(({ session, events }) =>
+            sessionToCsvRow(session, events.length)
+        )
+        downloadCsv(`aegis-sessions-${new Date().toISOString().slice(0, 10)}.csv`, rows)
+    }, [summary])
+
+    // ── Export a single session's events as CSV ───────────────────────────────
+    const handleExportSession = useCallback((row: SessionWithEvents) => {
+        if (row.events.length === 0) {
+            // Export session summary row even if no events
+            downloadCsv(
+                `aegis-session-${row.session.id.slice(0, 8)}.csv`,
+                [sessionToCsvRow(row.session, 0)]
+            )
+            return
+        }
+        const csvRows = row.events.map((e) => eventToCsvRow(e, row.session))
+        downloadCsv(`aegis-session-${row.session.id.slice(0, 8)}.csv`, csvRows)
+    }, [])
+
+    if (isLoading) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <PageSpinner />
+            </div>
+        )
+    }
+
+    if (error) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <div className="text-center space-y-2">
+                    <p className="text-rose-400 font-medium">Failed to load reports</p>
+                    <p className="text-slate-500 text-sm">{error}</p>
+                </div>
+            </div>
+        )
+    }
+
+    if (!summary) return null
+
+    const REPORT_STATS = [
+        { label: 'Total Sessions', value: summary.totalSessions, icon: <BarChart3 size={20} />, accent: 'indigo' as const },
+        { label: 'Avg. Risk Score', value: `${summary.avgRiskScore}%`, icon: <TrendingUp size={20} />, accent: 'cyan' as const },
+        { label: 'Total Flags', value: summary.totalFlags, icon: <AlertTriangle size={20} />, accent: 'amber' as const },
+        { label: 'Sessions w/ Flags', value: summary.sessionsWithFlags, icon: <Users size={20} />, accent: 'emerald' as const },
+    ]
+
     return (
         <div className="space-y-6 max-w-7xl">
             {/* Header */}
@@ -42,14 +134,22 @@ export function ReportsPage() {
             >
                 <div>
                     <h1 className="text-2xl font-bold text-white">Reports</h1>
-                    <p className="text-slate-400 text-sm mt-0.5">Analytics and insights across all sessions.</p>
+                    <p className="text-slate-400 text-sm mt-0.5">
+                        Analytics and insights across all sessions.
+                    </p>
                 </div>
                 <div className="flex items-center gap-2">
                     <Button variant="secondary" size="sm" icon={<Filter size={14} />}>
                         Filter
                     </Button>
-                    <Button variant="secondary" size="sm" icon={<Download size={14} />}>
-                        Export
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Download size={14} />}
+                        onClick={handleExportAll}
+                        disabled={summary.sessionRows.length === 0}
+                    >
+                        Export All
                     </Button>
                 </div>
             </motion.div>
@@ -73,27 +173,33 @@ export function ReportsPage() {
                             <h2 className="text-base font-semibold text-white">Flag Breakdown</h2>
                         </CardHeader>
                         <CardBody className="space-y-4">
-                            {FLAG_TYPES.map((f) => (
-                                <div key={f.label} className="space-y-1.5">
-                                    <div className="flex justify-between text-sm">
-                                        <span className="text-slate-300">{f.label}</span>
-                                        <span className="text-slate-400">{f.count}</span>
+                            {summary.flagBreakdown.length === 0 ? (
+                                <p className="text-slate-500 text-sm text-center py-4">
+                                    No flags recorded yet.
+                                </p>
+                            ) : (
+                                summary.flagBreakdown.map((f) => (
+                                    <div key={f.eventType} className="space-y-1.5">
+                                        <div className="flex justify-between text-sm">
+                                            <span className="text-slate-300">{f.label}</span>
+                                            <span className="text-slate-400">{f.count}</span>
+                                        </div>
+                                        <div className="h-2 bg-[#2a2a3a] rounded-full overflow-hidden">
+                                            <motion.div
+                                                initial={{ width: 0 }}
+                                                animate={{ width: `${f.pct}%` }}
+                                                transition={{ duration: 0.7, delay: 0.3 }}
+                                                className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full"
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="h-2 bg-[#2a2a3a] rounded-full overflow-hidden">
-                                        <motion.div
-                                            initial={{ width: 0 }}
-                                            animate={{ width: `${f.pct}%` }}
-                                            transition={{ duration: 0.7, delay: 0.3 }}
-                                            className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 rounded-full"
-                                        />
-                                    </div>
-                                </div>
-                            ))}
+                                ))
+                            )}
                         </CardBody>
                     </Card>
                 </motion.div>
 
-                {/* Session time distribution placeholder */}
+                {/* Session activity chart */}
                 <motion.div
                     initial={{ opacity: 0, y: 16 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -106,18 +212,18 @@ export function ReportsPage() {
                                 <h2 className="text-base font-semibold text-white">Session Activity</h2>
                                 <div className="flex items-center gap-1.5 text-slate-400 text-xs">
                                     <Clock size={13} />
-                                    <span>Last 30 days</span>
+                                    <span>Last 14 days</span>
                                 </div>
                             </div>
                         </CardHeader>
                         <CardBody className="flex items-end gap-1.5 h-40">
-                            {[40, 65, 30, 80, 55, 90, 45, 70, 35, 85, 60, 75, 50, 95].map((h, i) => (
+                            {summary.activityBars.map((h, i) => (
                                 <motion.div
                                     key={i}
                                     initial={{ scaleY: 0 }}
                                     animate={{ scaleY: 1 }}
                                     transition={{ duration: 0.4, delay: i * 0.04 }}
-                                    style={{ height: `${h}%`, originY: 1 }}
+                                    style={{ height: `${Math.max(h, 4)}%`, originY: 1 }}
                                     className="flex-1 bg-gradient-to-t from-indigo-600 to-indigo-400/60 rounded-t-sm min-w-0"
                                 />
                             ))}
@@ -136,38 +242,69 @@ export function ReportsPage() {
                     <CardHeader>
                         <h2 className="text-base font-semibold text-white">Session Reports</h2>
                     </CardHeader>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead>
-                                <tr className="border-b border-[#2a2a3a]">
-                                    {['Report ID', 'Session', 'Date', 'Participants', 'Flags', 'Risk', ''].map((h) => (
-                                        <th key={h} className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
-                                            {h}
-                                        </th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-[#2a2a3a]">
-                                {RECENT_REPORTS.map((r) => (
-                                    <tr key={r.id} className="hover:bg-[#1a1a26] transition-colors">
-                                        <td className="px-5 py-3.5 text-slate-400 font-mono text-xs">{r.id}</td>
-                                        <td className="px-5 py-3.5 text-slate-200 font-medium">{r.session}</td>
-                                        <td className="px-5 py-3.5 text-slate-400">{r.date}</td>
-                                        <td className="px-5 py-3.5 text-slate-300">{r.participants}</td>
-                                        <td className="px-5 py-3.5 text-slate-300">{r.flags}</td>
-                                        <td className="px-5 py-3.5">
-                                            <Badge variant={riskVariant(r.risk) as 'rose' | 'amber' | 'emerald'}>{r.risk}</Badge>
-                                        </td>
-                                        <td className="px-5 py-3.5">
-                                            <Button variant="ghost" size="sm" icon={<Download size={13} />}>
-                                                Export
-                                            </Button>
-                                        </td>
+                    {summary.sessionRows.length === 0 ? (
+                        <CardBody>
+                            <p className="text-slate-500 text-sm text-center py-6">
+                                No completed sessions to report on yet.
+                            </p>
+                        </CardBody>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="border-b border-[#2a2a3a]">
+                                        {['Session ID', 'Date', 'Duration', 'Flags', 'Risk Score', 'Risk', ''].map((h) => (
+                                            <th
+                                                key={h}
+                                                className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider"
+                                            >
+                                                {h}
+                                            </th>
+                                        ))}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody className="divide-y divide-[#2a2a3a]">
+                                    {summary.sessionRows.map((row) => (
+                                        <tr
+                                            key={row.session.id}
+                                            className="hover:bg-[#1a1a26] transition-colors"
+                                        >
+                                            <td className="px-5 py-3.5 text-slate-400 font-mono text-xs">
+                                                {row.session.id.slice(0, 8)}…
+                                            </td>
+                                            <td className="px-5 py-3.5 text-slate-400">
+                                                {formatDate(row.session.created_at)}
+                                            </td>
+                                            <td className="px-5 py-3.5 text-slate-400">
+                                                {getSessionDuration(row.session)}
+                                            </td>
+                                            <td className="px-5 py-3.5 text-slate-300">
+                                                {row.events.length}
+                                            </td>
+                                            <td className="px-5 py-3.5 text-slate-300">
+                                                {Math.round(row.session.risk_score)}%
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <Badge variant={getRiskVariant(row.session.risk_score)}>
+                                                    {getRiskLabel(row.session.risk_score)}
+                                                </Badge>
+                                            </td>
+                                            <td className="px-5 py-3.5">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    icon={<Download size={13} />}
+                                                    onClick={() => handleExportSession(row)}
+                                                >
+                                                    Export
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
                 </Card>
             </motion.div>
         </div>
