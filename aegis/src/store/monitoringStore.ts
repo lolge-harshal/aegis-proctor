@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand'
-import type { MonitoringEventRow, EventSeverity } from '@/services/supabase'
+import type { MonitoringEventRow } from '@/services/supabase'
 
 export interface LiveEvent extends MonitoringEventRow {
     /** Client-side flag so the feed can animate new arrivals */

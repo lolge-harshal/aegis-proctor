@@ -8,6 +8,7 @@ import { LiveSessionPage } from '@/features/session/pages/LiveSessionPage'
 import { ReportsPage } from '@/features/reports/pages/ReportsPage'
 import { SessionHistoryPage } from '@/features/history/pages/SessionHistoryPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { RoleRedirect } from '@/components/RoleRedirect'
 
 export const router = createBrowserRouter([
     {
@@ -26,11 +27,38 @@ export const router = createBrowserRouter([
             </ProtectedRoute>
         ),
         children: [
-            { index: true, element: <Navigate to="/dashboard" replace /> },
-            { path: 'dashboard', element: <DashboardPage /> },
+            // Root redirect is role-aware: candidates go to /session/live,
+            // proctors/admins go to /dashboard
+            { index: true, element: <RoleRedirect /> },
+
+            // Proctor/admin only routes
+            {
+                path: 'dashboard',
+                element: (
+                    <ProtectedRoute allowedRoles={['proctor', 'admin']}>
+                        <DashboardPage />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: 'reports',
+                element: (
+                    <ProtectedRoute allowedRoles={['proctor', 'admin']}>
+                        <ReportsPage />
+                    </ProtectedRoute>
+                ),
+            },
+            {
+                path: 'history',
+                element: (
+                    <ProtectedRoute allowedRoles={['proctor', 'admin']}>
+                        <SessionHistoryPage />
+                    </ProtectedRoute>
+                ),
+            },
+
+            // Available to all authenticated roles
             { path: 'session/live', element: <LiveSessionPage /> },
-            { path: 'reports', element: <ReportsPage /> },
-            { path: 'history', element: <SessionHistoryPage /> },
         ],
     },
     { path: '*', element: <NotFoundPage /> },

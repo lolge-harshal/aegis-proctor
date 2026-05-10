@@ -19,6 +19,7 @@ import {
     subscribeToEvents,
     getSessionEvents,
 } from '@/services/supabase'
+import { supabase } from '@/services/supabase/client'
 import { useMonitoring } from '@/hooks/useMonitoring'
 import { requestFullscreen } from '@/monitoring/rules/fullscreenRules'
 import type { ExamSessionRow, MonitoringEventRow, EventSeverity } from '@/services/supabase'
@@ -90,10 +91,14 @@ export function CandidateSessionView() {
     }, [])
 
     const cleanupSubscriptions = useCallback(() => {
-        sessionChannelRef.current?.unsubscribe()
-        sessionChannelRef.current = null
-        eventsChannelRef.current?.unsubscribe()
-        eventsChannelRef.current = null
+        if (sessionChannelRef.current) {
+            supabase.removeChannel(sessionChannelRef.current)
+            sessionChannelRef.current = null
+        }
+        if (eventsChannelRef.current) {
+            supabase.removeChannel(eventsChannelRef.current)
+            eventsChannelRef.current = null
+        }
         stopTimer()
     }, [stopTimer])
 
@@ -119,11 +124,7 @@ export function CandidateSessionView() {
                 .then((data) => setEvents(data))
                 .catch(() => { })
             attachSubscriptions(sessionId)
-            startMonitoring(sessionId)
-                .then(() => {
-                    if (videoElRef.current) attachPreview(videoElRef.current)
-                })
-                .catch(() => { })
+            startMonitoring(sessionId).catch(() => { })
         }
         return cleanupSubscriptions
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,7 +144,6 @@ export function CandidateSessionView() {
             setStatus('live')
             attachSubscriptions(session.id)
             await startMonitoring(session.id)
-            if (videoElRef.current) attachPreview(videoElRef.current)
         } catch (err) {
             setStartError(err instanceof Error ? err.message : 'Failed to start session.')
             setStatus('idle')
@@ -316,10 +316,10 @@ export function CandidateSessionView() {
                         <CardBody className="py-3">
                             <div className="flex items-center gap-2">
                                 <div className={`w-2 h-2 rounded-full shrink-0 ${engineStatus.state === 'running'
-                                        ? 'bg-emerald-500 animate-pulse'
-                                        : engineStatus.state === 'error'
-                                            ? 'bg-rose-500'
-                                            : 'bg-slate-500'
+                                    ? 'bg-emerald-500 animate-pulse'
+                                    : engineStatus.state === 'error'
+                                        ? 'bg-rose-500'
+                                        : 'bg-slate-500'
                                     }`} />
                                 <p className="text-xs text-slate-400">
                                     {engineStatusLabel(engineStatus)}
@@ -406,8 +406,8 @@ export function CandidateSessionView() {
                                         >
                                             <div className="flex items-center gap-3">
                                                 <div className={`w-2 h-2 rounded-full shrink-0 ${event.severity === 'high' ? 'bg-rose-500'
-                                                        : event.severity === 'medium' ? 'bg-amber-500'
-                                                            : 'bg-slate-500'
+                                                    : event.severity === 'medium' ? 'bg-amber-500'
+                                                        : 'bg-slate-500'
                                                     }`} />
                                                 <div>
                                                     <p className="text-sm font-medium text-slate-200">
