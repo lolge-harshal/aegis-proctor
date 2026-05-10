@@ -36,6 +36,7 @@ export const useSessionStore = create<SessionState>((set) => ({
         set((s) => ({
             participants: s.participants.map((p) => (p.id === id ? { ...p, ...updates } : p)),
         })),
+    // Use functional update so the reference is always stable — no closure over stale state
     incrementElapsed: () => set((s) => ({ elapsedSeconds: s.elapsedSeconds + 1 })),
-    resetSession: () => set({ status: 'idle', sessionId: null, participants: [], elapsedSeconds: 0 }),
+    resetSession: () => set({ status: 'idle', sessionId: null, participants: [], elapsedSeconds: 0, }),
 }))

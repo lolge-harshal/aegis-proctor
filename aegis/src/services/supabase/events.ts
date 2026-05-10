@@ -66,7 +66,7 @@ export async function recordDetection(params: {
         event_type: params.eventType,
         severity: params.severity,
         confidence_score: params.confidenceScore ?? null,
-        event_snapshot: params.snapshot ? (params.snapshot as Record<string, unknown>) : null,
+        event_snapshot: params.snapshot ? (params.snapshot as unknown as import('./types').Json) : null,
         screenshot_url: params.screenshotUrl ?? null,
         is_suspicious: params.isSuspicious ?? true,
     })
