@@ -114,16 +114,25 @@ export async function getEventsBySeverity(
  * Subscribe to new monitoring events for a session.
  * Fires onInsert for every new row — ideal for live alert feeds.
  *
+ * Uses a unique channel name per call (via Date.now()) so that if a previous
+ * channel for the same session is still being torn down, the new subscription
+ * always gets a fresh channel object from the Supabase client registry.
+ *
+ * Callers MUST clean up with `supabase.removeChannel(channel)` (not just
+ * `channel.unsubscribe()`) so the channel is fully removed from the registry.
+ *
  * @example
  * const channel = subscribeToEvents(sessionId, (e) => addAlert(e))
- * return () => channel.unsubscribe()
+ * return () => supabase.removeChannel(channel)
  */
 export function subscribeToEvents(
     sessionId: string,
     onInsert: (event: MonitoringEventRow) => void,
 ): RealtimeChannel {
+    // Unique suffix prevents channel name collisions on Strict Mode double-mount
+    const channelName = `events:${sessionId}:${Date.now()}`
     return supabase
-        .channel(`events:${sessionId}`)
+        .channel(channelName)
         .on(
             'postgres_changes',
             {
