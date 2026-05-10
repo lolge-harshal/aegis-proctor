@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, Shield, UserCheck, Video } from 'lucide-react'
 import { useAuth } from '@/features/auth/hooks'
 import { Button } from '@/components/ui/Button'
@@ -110,22 +110,25 @@ export function LoginPage() {
             {/* Header */}
             <div className="text-center space-y-3">
                 <div className="flex justify-center">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-xl shadow-indigo-600/30">
-                        <Shield size={28} className="text-white" />
+                    <div className="relative">
+                        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-xl shadow-indigo-600/30">
+                            <Shield size={26} className="text-white" />
+                        </div>
+                        <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 blur-xl opacity-40 -z-10" />
                     </div>
                 </div>
                 <div>
                     <h1 className="text-2xl font-bold text-white">Welcome to Aegis</h1>
-                    <p className="text-slate-400 text-sm mt-1">AI-powered proctoring platform</p>
+                    <p className="text-slate-500 text-sm mt-1">AI-powered proctoring platform</p>
                 </div>
             </div>
 
             {/* Form */}
-            <div className="bg-[#16161f] border border-[#2a2a3a] rounded-2xl p-6 space-y-5">
+            <div className="bg-[#16161f] border border-[#2a2a3a] rounded-2xl p-6 space-y-5 shadow-2xl shadow-black/40">
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Role selector */}
                     <div className="space-y-2">
-                        <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+                        <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Sign in as
                         </label>
                         <div className="flex gap-3">
@@ -152,7 +155,7 @@ export function LoginPage() {
                         placeholder="you@example.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        icon={<Mail size={15} />}
+                        icon={<Mail size={14} />}
                         autoComplete="email"
                     />
                     <Input
@@ -161,19 +164,22 @@ export function LoginPage() {
                         placeholder="••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        icon={<Lock size={15} />}
+                        icon={<Lock size={14} />}
                         autoComplete="current-password"
                     />
 
-                    {displayError && (
-                        <motion.p
-                            initial={{ opacity: 0, y: -4 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3 py-2"
-                        >
-                            {displayError}
-                        </motion.p>
-                    )}
+                    <AnimatePresence>
+                        {displayError && (
+                            <motion.p
+                                initial={{ opacity: 0, y: -4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2.5"
+                            >
+                                {displayError}
+                            </motion.p>
+                        )}
+                    </AnimatePresence>
 
                     <Button
                         type="submit"
@@ -194,7 +200,7 @@ export function LoginPage() {
                 </div>
             </div>
 
-            <p className="text-center text-xs text-slate-500">
+            <p className="text-center text-xs text-slate-700">
                 Protected by Aegis AI · End-to-end encrypted
             </p>
         </div>

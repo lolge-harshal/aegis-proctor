@@ -216,15 +216,16 @@ export function ReportsPage() {
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardBody className="flex items-end gap-1.5 h-40">
+                        <CardBody className="flex items-end gap-1.5 h-40 pb-2">
                             {summary.activityBars.map((h, i) => (
                                 <motion.div
                                     key={i}
                                     initial={{ scaleY: 0 }}
                                     animate={{ scaleY: 1 }}
-                                    transition={{ duration: 0.4, delay: i * 0.04 }}
+                                    transition={{ duration: 0.4, delay: i * 0.04, ease: 'easeOut' }}
                                     style={{ height: `${Math.max(h, 4)}%`, originY: 1 }}
-                                    className="flex-1 bg-gradient-to-t from-indigo-600 to-indigo-400/60 rounded-t-sm min-w-0"
+                                    className="flex-1 bg-gradient-to-t from-indigo-600 to-indigo-400/60 rounded-t-sm min-w-0 hover:from-indigo-500 hover:to-indigo-300/70 transition-colors cursor-default"
+                                    title={`${Math.round(h)}%`}
                                 />
                             ))}
                         </CardBody>
