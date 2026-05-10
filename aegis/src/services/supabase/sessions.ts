@@ -105,16 +105,25 @@ export async function updateSession(
  * Subscribe to live changes on a single session row.
  * Returns the channel so the caller can unsubscribe.
  *
+ * Uses a unique channel name per call (via Date.now()) so that if a previous
+ * channel for the same session is still being torn down, the new subscription
+ * always gets a fresh channel object from the Supabase client registry.
+ *
+ * Callers MUST clean up with `supabase.removeChannel(channel)` (not just
+ * `channel.unsubscribe()`) so the channel is fully removed from the registry.
+ *
  * @example
  * const channel = subscribeToSession(sessionId, (row) => setSession(row))
- * return () => channel.unsubscribe()
+ * return () => supabase.removeChannel(channel)
  */
 export function subscribeToSession(
     sessionId: string,
     onUpdate: (session: ExamSessionRow) => void,
 ): RealtimeChannel {
+    // Unique suffix prevents channel name collisions on Strict Mode double-mount
+    const channelName = `session:${sessionId}:${Date.now()}`
     return supabase
-        .channel(`session:${sessionId}`)
+        .channel(channelName)
         .on(
             'postgres_changes',
             {

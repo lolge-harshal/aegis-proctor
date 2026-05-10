@@ -10,19 +10,29 @@ import {
     Shield,
 } from 'lucide-react'
 import { useUIStore } from '@/store/uiStore'
+import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 
-const NAV_ITEMS = [
+// Nav items visible to proctors and admins
+const PROCTOR_NAV = [
     { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/session/live', icon: Video, label: 'Live Session' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/history', icon: History, label: 'Session History' },
 ]
 
+// Nav items visible to candidates (minimal — just the exam session)
+const CANDIDATE_NAV = [
+    { to: '/session/live', icon: Video, label: 'My Session' },
+]
+
 export function Sidebar() {
     const collapsed = useUIStore((s) => s.sidebarCollapsed)
     const toggleSidebar = useUIStore((s) => s.toggleSidebar)
+    const role = useAuthStore((s) => s.user?.role)
     const location = useLocation()
+
+    const navItems = role === 'candidate' ? CANDIDATE_NAV : PROCTOR_NAV
 
     return (
         <motion.aside
@@ -54,7 +64,7 @@ export function Sidebar() {
 
             {/* Nav */}
             <nav className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
-                {NAV_ITEMS.map(({ to, icon: Icon, label }) => {
+                {navItems.map(({ to, icon: Icon, label }) => {
                     const isActive = location.pathname.startsWith(to)
                     return (
                         <NavLink
@@ -92,6 +102,29 @@ export function Sidebar() {
                     )
                 })}
             </nav>
+
+            {/* Role badge */}
+            <AnimatePresence>
+                {!collapsed && role && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="px-4 pb-2"
+                    >
+                        <span className={cn(
+                            'inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider',
+                            role === 'candidate'
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                : role === 'admin'
+                                    ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20'
+                                    : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                        )}>
+                            {role}
+                        </span>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* Collapse toggle */}
             <div className="p-2 border-t border-[#2a2a3a]">
