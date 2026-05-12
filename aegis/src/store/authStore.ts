@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import { signInWithEmail, signOut } from '@/services/supabase'
-import type { UserRole as DBUserRole } from '@/services/supabase'
+import { signInWithEmail, signOut, signUpWithEmail } from '@/services/supabase'
+import type { UserRole as DBUserRole, SignUpOptions } from '@/services/supabase'
 
 export type UserRole = DBUserRole
 
@@ -22,6 +22,7 @@ interface AuthState {
 
     // ── Actions ────────────────────────────────────────────────────────────
     login: (email: string, password: string) => Promise<void>
+    signUp: (options: SignUpOptions) => Promise<{ needsEmailConfirmation: boolean }>
     logout: () => Promise<void>
     /** Called by useAuthInit to sync Supabase session → store. */
     setUserFromSession: (user: User | null) => void
@@ -49,6 +50,27 @@ export const useAuthStore = create<AuthState>()((set) => ({
         // Session is set by the onAuthStateChange listener in useAuthInit,
         // so we don't need to set user here — just clear the loading flag.
         // (isLoading will be cleared by the listener callback)
+    },
+
+    signUp: async (options) => {
+        set({ isLoading: true, error: null })
+
+        const { data: session, error } = await signUpWithEmail(options)
+
+        if (error) {
+            set({ isLoading: false, error: error.message })
+            throw error
+        }
+
+        // If session is null, Supabase requires email confirmation
+        const needsEmailConfirmation = session === null
+        if (needsEmailConfirmation) {
+            set({ isLoading: false })
+        }
+        // If session exists, useAuthInit's onAuthStateChange will fire and
+        // set the user — isLoading will be cleared there.
+
+        return { needsEmailConfirmation }
     },
 
     logout: async () => {
