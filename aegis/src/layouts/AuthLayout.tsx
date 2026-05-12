@@ -1,11 +1,17 @@
-import { Outlet, Navigate } from 'react-router-dom'
+import { Outlet, Navigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { motion } from 'framer-motion'
 
+// Routes that authenticated users are allowed to visit (e.g. password update)
+const ALLOW_AUTHENTICATED = ['/auth/update-password']
+
 export function AuthLayout() {
     const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+    const location = useLocation()
 
-    if (isAuthenticated) return <Navigate to="/dashboard" replace />
+    if (isAuthenticated && !ALLOW_AUTHENTICATED.includes(location.pathname)) {
+        return <Navigate to="/dashboard" replace />
+    }
 
     return (
         <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center relative overflow-hidden">
@@ -28,7 +34,7 @@ export function AuthLayout() {
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] }}
-                className="relative z-10 w-full max-w-md px-4"
+                className="relative z-10 w-full max-w-md px-4 py-8"
             >
                 <Outlet />
             </motion.div>

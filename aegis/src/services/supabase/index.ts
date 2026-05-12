@@ -10,13 +10,18 @@ export { supabase } from './client'
 // Auth
 export {
     signInWithEmail,
+    signUpWithEmail,
     signOut,
     getSession,
     getUser,
     fetchProfile,
     upsertProfile,
     onAuthStateChange,
+    sendPasswordResetEmail,
+    updatePassword,
 } from './auth'
+
+export type { SignUpOptions } from './auth'
 
 // Sessions
 export {

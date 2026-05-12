@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Mail, Lock, Shield, UserCheck, Video } from 'lucide-react'
 import { useAuth } from '@/features/auth/hooks'
@@ -28,7 +28,7 @@ function RoleCard({ selected, onSelect, icon, title, description }: RoleCardProp
             type="button"
             onClick={onSelect}
             className={cn(
-                'flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-xl border transition-all duration-150 text-left',
+                'flex-1 flex flex-col items-center gap-2 px-3 py-3 rounded-xl border transition-all duration-150 text-left',
                 selected
                     ? 'border-indigo-500/60 bg-indigo-500/10 text-indigo-300'
                     : 'border-[#2a2a3a] bg-[#0e0e16] text-slate-400 hover:border-[#3a3a4a] hover:text-slate-300'
@@ -37,7 +37,7 @@ function RoleCard({ selected, onSelect, icon, title, description }: RoleCardProp
             aria-label={`Sign in as ${title}`}
         >
             <div className={cn(
-                'w-10 h-10 rounded-lg flex items-center justify-center',
+                'w-9 h-9 rounded-lg flex items-center justify-center',
                 selected ? 'bg-indigo-500/20' : 'bg-[#1c1c28]'
             )}>
                 {icon}
@@ -79,34 +79,33 @@ export function LoginPage() {
         setLocalError('')
         clearError()
 
-        if (!email || !password) {
-            setLocalError('Please fill in all fields.')
+        if (!email.trim()) {
+            setLocalError('Email is required.')
+            return
+        }
+        if (!password) {
+            setLocalError('Password is required.')
             return
         }
 
         try {
-            await login(email, password)
+            await login(email.trim(), password)
 
             // After login, update the profile role to the selected role.
-            // useAuthInit will have set the user by now via onAuthStateChange,
-            // but we also update the store directly so the UI reflects the
-            // chosen role immediately without waiting for a re-fetch.
             const currentUser = useAuthStore.getState().user
             if (currentUser) {
-                // Persist role to DB
                 await upsertProfile({ id: currentUser.id, role: selectedRole })
-                // Update store immediately
                 setUserFromSession({ ...currentUser, role: selectedRole })
             }
 
             navigate(from, { replace: true })
         } catch {
-            // Error is already stored in authStore.error — no extra handling needed
+            // Error is already stored in authStore.error
         }
     }
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-6">
             {/* Header */}
             <div className="text-center space-y-3">
                 <div className="flex justify-center">
@@ -193,10 +192,19 @@ export function LoginPage() {
                     </Button>
                 </form>
 
-                <div className="text-center">
-                    <a href="#" className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
-                        Forgot your password?
-                    </a>
+                <div className="flex items-center justify-between pt-1">
+                    <Link
+                        to="/auth/forgot-password"
+                        className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                        Forgot password?
+                    </Link>
+                    <Link
+                        to="/auth/signup"
+                        className="text-sm text-slate-400 hover:text-slate-200 transition-colors"
+                    >
+                        Create account
+                    </Link>
                 </div>
             </div>
 
